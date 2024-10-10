@@ -1,0 +1,69 @@
+version: 2.1
+orbs:
+  python: circleci/python@2.0.3
+  aws-cli: circleci/aws-cli@3.1.5
+  #ansible: orbss/ansible-playbook@0.0.5
+  ruby: circleci/ruby@2.0.0
+
+
+jobs:
+  cfn-lint:
+    executor: python/default
+    steps:
+      - checkout
+      - run: pip install cfn-lint
+      - run:
+          name: run cfn-lint
+          command: |
+            cfn-lint -i W3002 -t cloudformation/*.yml
+
+  execute-cfn:
+    executor: aws-cli/default
+    steps:
+      - checkout
+      - aws-cli/setup:
+          aws-access-key-id: AWS_ACCESS_KEY_ID
+          aws-secret-access-key: AWS_SECRET_ACCESS_KEY
+          aws-region: AWS_DEFAULT_REGION
+      - run:
+          name: cloudformation deploy
+          command: |
+            set -x
+            aws cloudformation deploy --template-file cloudformation/01_vpc.yml --stack-name test01
+            aws cloudformation deploy --template-file cloudformation/02_ec2.yml --stack-name test02 --capabilities CAPABILITY_IAM
+
+  execute-serverspec:
+    executor: ruby/default
+    steps:
+      - checkout
+      # サーバーのセットアップ
+      - run:
+          name: bundle install
+          command: |
+            cd serverspec
+            gem list -e rails
+            bundle install --path vendor/bundle
+
+      # Serverspecのテストを実行
+      - add_ssh_keys:
+          fingerprints:
+            - "SHA256:DL30nbcY5WvBUdOBzswPTW/s80ui0cCbz8lc8vGInts"
+      - run:
+          name: execute serverspec
+          command: |
+            cd serverspec
+            bundle exec rake spec
+
+workflows:
+  lecture13:
+    jobs:
+      - cfn-lint
+      - execute-cfn:
+          requires:
+            - cfn-lint
+      #- execute-ansible:
+          #requires:
+            #- execute-cfn
+      - execute-serverspec:
+          requires:
+            - execute-cfn
